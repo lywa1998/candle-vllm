@@ -1,9 +1,11 @@
+// REFs: vllm/entrypoints/openai/api_server.py 
 use super::requests::ChatCompletionRequest;
 use super::requests::Messages;
 use super::responses::{APIError, ChatCompletionResponse, ChatResponder};
 use super::sampling_params::{EarlyStoppingCondition, SamplingParams};
 use super::streaming::{Streamer, StreamingStatus};
 use super::OpenAIServerData;
+use axum::http::StatusCode;
 use axum::response::sse::KeepAlive;
 use axum::{
     extract::{Json, State},
@@ -16,6 +18,7 @@ use std::time::SystemTime;
 use tokenizers::Encoding;
 use tokio::time::Duration;
 use uuid::Uuid;
+use super::protocol::{CreateChatCompletionRequest};
 // fn verify_model(data: &OpenAIServerData<'_>, model_name: &String) -> Result<(), APIError> {
 //     let current_name = {
 //         let model = data.model.lock().unwrap();
@@ -120,9 +123,7 @@ pub async fn chat_completions(
     //     return Either::Left(Err(res.err().unwrap()));
     // }
 
-    if request.logit_bias.as_ref().is_some()
-        && request.logit_bias.as_ref().is_some_and(|x| !x.is_empty())
-    {
+    if request.logit_bias.as_ref().is_some_and(|x| !x.is_empty()) {
         return ChatResponder::ValidationError(APIError::new_str(
             "`logit_bias` is not currently supported.",
         ));
@@ -241,4 +242,14 @@ pub async fn chat_completions(
             usage: usage.clone(),
         })
     }
+}
+
+#[utoipa::path(
+    get,
+    tag = "candle-vllm",
+    path = "/health",
+    responses((status = 200, description = "Health check"))
+)]
+async fn health() -> StatusCode {
+    StatusCode::OK
 }

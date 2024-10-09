@@ -83,14 +83,14 @@ impl LLMEngine {
         }));
         let engine_clone = engine.clone();
 
-        let _ = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             tokio::runtime::Handle::current().block_on(async move {
                 loop {
                     notify.notified().await; // Blocking call to wait for notification
-                    let _ = tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                     let mut e = engine.lock().await;
                     let result = e.generate_once().unwrap();
-                    if result.len() == 0 {
+                    if result.is_empty() {
                         continue;
                     }
                     for request_id in result.keys() {

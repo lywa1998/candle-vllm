@@ -134,12 +134,13 @@ async fn main() -> Result<(), APIError> {
     };
 
     let device = candle_examples::device(args.cpu).unwrap();
-    let model = loader.load_model(paths, dtype, device)?;
-    let config: Config = model.0.get_model_config();
+    let (model, model_config) = loader.load_model(paths, dtype, device)?;
+    let config: Config = model.get_model_config();
     let dsize = config.kv_cache_dtype.size_in_bytes();
+
     let num_gpu_blocks = args.kvcache_mem_gpu * SIZE_IN_MB
         / dsize
-        / args.block_size
+        / args.block_size // blocks
         / config.num_key_value_heads
         / config.get_head_size()
         / config.num_hidden_layers
@@ -151,6 +152,7 @@ async fn main() -> Result<(), APIError> {
         / config.get_head_size()
         / config.num_hidden_layers
         / 2;
+
     let cache_config = CacheConfig {
         block_size: args.block_size,
         num_gpu_blocks: Some(num_gpu_blocks),
@@ -159,9 +161,10 @@ async fn main() -> Result<(), APIError> {
         dtype: config.kv_cache_dtype,
     };
     println!("Cache config {:?}", cache_config);
+
     let finish_notify = Arc::new(Notify::new());
     let llm_engine = LLMEngine::new(
-        model.0,
+        model,
         SchedulerConfig {
             max_num_seqs: args.max_num_seqs,
         },
@@ -171,7 +174,7 @@ async fn main() -> Result<(), APIError> {
     )?;
 
     let server_data = OpenAIServerData {
-        pipeline_config: model.1,
+        pipeline_config: model_config,
         model: llm_engine,
         record_conversation: args.record_conversation,
         device: Device::Cpu,

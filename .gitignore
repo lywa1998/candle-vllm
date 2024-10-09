@@ -1,6 +1,8 @@
 /target
 .hf_token
 __pycache__
-*.ptx
+*.py
+jina-embeddings-v3/
+*test*.ptx
 launch.json
 libpagedattention.a

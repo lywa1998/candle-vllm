@@ -82,7 +82,8 @@ impl CacheEngine {
             Self::calculate_key_block_shape(model_config, dtype, cache_config.block_size);
         let value_block_shape =
             Self::calculate_value_block_shape(model_config, cache_config.block_size);
-        let mut gpu_cache = Vec::new();
+        // presign the cache
+        let mut gpu_cache = Vec::with_capacity(model_config.num_hidden_layers);
         for _ in 0..model_config.num_hidden_layers {
             let key_blocks = try_api!(Tensor::zeros(
                 (

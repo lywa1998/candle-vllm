@@ -6,6 +6,7 @@ use tokio::sync::{Mutex, Notify};
 use self::{pipelines::llm_engine::LLMEngine, responses::APIError};
 
 pub mod requests;
+pub mod protocol;
 pub mod responses;
 pub mod sampling_params;
 pub mod streaming;
