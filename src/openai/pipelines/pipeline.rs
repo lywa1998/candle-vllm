@@ -15,11 +15,7 @@ use crate::{
             gemma::{Gemma, GemmaConfig},
             llama::{Llama, LlamaConfig},
             mistral::{Mistral, MistralConfig},
-            phi2::{Phi2, Phi2Config},
-            phi3::{Phi, PhiConfig},
             qwen2::{Qwen2, QwenConfig},
-            stable_lm::{StableLM, StableLMConfig},
-            yi::{Yi, YiConfig},
             Config,
         },
         responses::APIError,
@@ -44,13 +40,9 @@ const MIN_GEN_TOKENS: usize = 128;
 const MAX_GEN_TOKENS: usize = 4096;
 enum LLMModel {
     Llama(Llama),
-    Phi2(Phi2),
-    Phi3(Phi),
     Qwen2(Qwen2),
     Gemma(Gemma),
     Mistral(Mistral),
-    Yi(Yi),
-    StableLM(StableLM),
 }
 /// top-p, multinomial, and argmax sampling are implemented. Beam search is not implemented.
 pub struct DefaultPipeline {
@@ -146,19 +138,6 @@ impl ModelLoader for DefaultLoader {
                 ),));
                 config.into_config(false, dtype, &specific_args)
             }
-            "phi2" => {
-                let config: Phi2Config = try_api!(serde_json::from_slice(&try_api!(
-                    std::fs::read(paths.get_config_filename())
-                ),));
-                //Phi2 use F32 type for kvcache
-                config.into_config(false, DType::F32, &specific_args)
-            }
-            "phi3" => {
-                let config: PhiConfig = try_api!(serde_json::from_slice(&try_api!(std::fs::read(
-                    paths.get_config_filename()
-                )),));
-                config.into_config(false, dtype, &specific_args)
-            }
             "qwen2" => {
                 let config: QwenConfig = try_api!(serde_json::from_slice(&try_api!(
                     std::fs::read(paths.get_config_filename())
@@ -173,18 +152,6 @@ impl ModelLoader for DefaultLoader {
             }
             "mistral" => {
                 let config: MistralConfig = try_api!(serde_json::from_slice(&try_api!(
-                    std::fs::read(paths.get_config_filename())
-                ),));
-                config.into_config(false, dtype, &specific_args)
-            }
-            "yi" => {
-                let config: YiConfig = try_api!(serde_json::from_slice(&try_api!(std::fs::read(
-                    paths.get_config_filename()
-                )),));
-                config.into_config(false, dtype, &specific_args)
-            }
-            "stablelm" => {
-                let config: StableLMConfig = try_api!(serde_json::from_slice(&try_api!(
                     std::fs::read(paths.get_config_filename())
                 ),));
                 config.into_config(false, dtype, &specific_args)
@@ -212,14 +179,6 @@ impl ModelLoader for DefaultLoader {
                 LLMModel::Llama(try_api!(Llama::load(vb, &config, dtype, &device))),
                 SeparatorStyle::Llama3,
             ),
-            "phi2" => (
-                LLMModel::Phi2(try_api!(Phi2::new(vb, &config, dtype, &device))),
-                SeparatorStyle::Phi,
-            ),
-            "phi3" => (
-                LLMModel::Phi3(try_api!(Phi::new(vb, &config, dtype, &device))),
-                SeparatorStyle::Phi,
-            ),
             "qwen2" => (
                 LLMModel::Qwen2(try_api!(Qwen2::new(vb, &config, dtype, &device))),
                 SeparatorStyle::Qwen2,
@@ -231,14 +190,6 @@ impl ModelLoader for DefaultLoader {
             "mistral" => (
                 LLMModel::Mistral(try_api!(Mistral::new(vb, &config, dtype, &device))),
                 SeparatorStyle::Mistral,
-            ),
-            "yi" => (
-                LLMModel::Yi(try_api!(Yi::new(vb, &config, dtype, &device))),
-                SeparatorStyle::Yi,
-            ),
-            "stablelm" => (
-                LLMModel::StableLM(try_api!(StableLM::new(vb, &config, dtype, &device))),
-                SeparatorStyle::StableLM,
             ),
             _ => panic!("Model not supported!"),
         };
@@ -372,22 +323,6 @@ impl ModulePipeline for DefaultPipeline {
                     &mut input_metadata,
                 )
                 .map_err(APIError::from),
-            LLMModel::Phi2(phi) => phi
-                .forward(
-                    &input_tokens,
-                    input_positions,
-                    kv_cache,
-                    &mut input_metadata,
-                )
-                .map_err(APIError::from),
-            LLMModel::Phi3(phi) => phi
-                .forward(
-                    &input_tokens,
-                    input_positions,
-                    kv_cache,
-                    &mut input_metadata,
-                )
-                .map_err(APIError::from),
             LLMModel::Qwen2(qwen2) => qwen2
                 .forward(
                     &input_tokens,
@@ -405,22 +340,6 @@ impl ModulePipeline for DefaultPipeline {
                 )
                 .map_err(APIError::from),
             LLMModel::Mistral(mistral) => mistral
-                .forward(
-                    &input_tokens,
-                    input_positions,
-                    kv_cache,
-                    &mut input_metadata,
-                )
-                .map_err(APIError::from),
-            LLMModel::Yi(yi) => yi
-                .forward(
-                    &input_tokens,
-                    input_positions,
-                    kv_cache,
-                    &mut input_metadata,
-                )
-                .map_err(APIError::from),
-            LLMModel::StableLM(stablelm) => stablelm
                 .forward(
                     &input_tokens,
                     input_positions,
@@ -547,13 +466,9 @@ impl ModulePipeline for DefaultPipeline {
     fn get_model_config(&self) -> Config {
         match &self.model {
             LLMModel::Llama(llama) => llama.get_config().clone(),
-            LLMModel::Phi2(phi) => phi.get_config().clone(),
-            LLMModel::Phi3(phi) => phi.get_config().clone(),
             LLMModel::Qwen2(qwen2) => qwen2.get_config().clone(),
             LLMModel::Gemma(gemma) => gemma.get_config().clone(),
             LLMModel::Mistral(mistral) => mistral.get_config().clone(),
-            LLMModel::Yi(yi) => yi.get_config().clone(),
-            LLMModel::StableLM(stablelm) => stablelm.get_config().clone(),
         }
     }
 

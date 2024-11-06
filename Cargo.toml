@@ -53,3 +53,6 @@ cudnn = ["candle-core/cudnn"]
 flash-attn = ["cuda", "candle-transformers/flash-attn"]
 mkl = ["dep:intel-mkl-src", "candle-core/mkl", "candle-nn/mkl", "candle-transformers/mkl"]
 nccl = ["cuda", "cudarc/nccl"]
+
+[lints.rust]
+unused = "allow"

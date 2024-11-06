@@ -8,25 +8,6 @@ use openai::pipelines::{pipeline::DefaultLoader, ModelLoader};
 
 #[derive(Debug, Subcommand)]
 pub enum ModelSelected {
-    /// Select the llama model (default llama2-7b).
-    Llama {
-        /// Control the application of repeat penalty for the last n tokens
-        #[arg(long)]
-        repeat_last_n: Option<usize>,
-
-        #[arg(long)]
-        temperature: Option<f32>,
-
-        #[arg(long)]
-        penalty: Option<f32>,
-
-        #[arg(long)]
-        max_gen_tokens: Option<usize>,
-
-        #[arg(long)]
-        quant: Option<String>,
-    },
-
     /// Select the llama3 model (default llama3.1-8b).
     Llama3 {
         /// Control the application of repeat penalty for the last n tokens
@@ -35,50 +16,6 @@ pub enum ModelSelected {
 
         #[arg(long)]
         temperature: Option<f32>,
-
-        #[arg(long)]
-        penalty: Option<f32>,
-
-        #[arg(long)]
-        max_gen_tokens: Option<usize>,
-
-        #[arg(long)]
-        quant: Option<String>,
-    },
-
-    /// Select the phi2 model (default 2.7b).
-    Phi2 {
-        /// Control the application of repeat penalty for the last n tokens
-        #[arg(long)]
-        repeat_last_n: Option<usize>,
-
-        #[arg(long)]
-        temperature: Option<f32>,
-
-        #[arg(long)]
-        penalty: Option<f32>,
-
-        #[arg(long)]
-        max_gen_tokens: Option<usize>,
-
-        #[arg(long)]
-        quant: Option<String>,
-    },
-
-    /// Select the phi3 model (default 3.8b).
-    Phi3 {
-        /// Control the application of repeat penalty for the last n tokens
-        #[arg(long)]
-        repeat_last_n: Option<usize>,
-
-        #[arg(long)]
-        temperature: Option<f32>,
-
-        #[arg(long)]
-        top_p: Option<f64>,
-
-        #[arg(long)]
-        top_k: Option<usize>,
 
         #[arg(long)]
         penalty: Option<f32>,
@@ -152,74 +89,15 @@ pub enum ModelSelected {
         #[arg(long)]
         quant: Option<String>,
     },
-
-    /// Select the Yi model (default 6b).
-    Yi {
-        /// Control the application of repeat penalty for the last n tokens
-        #[arg(long)]
-        repeat_last_n: Option<usize>,
-
-        #[arg(long)]
-        temperature: Option<f32>,
-
-        #[arg(long)]
-        penalty: Option<f32>,
-
-        #[arg(long)]
-        max_gen_tokens: Option<usize>,
-
-        #[arg(long)]
-        quant: Option<String>,
-    },
-
-    /// Select the stable-lm model (default zephyr-3b).
-    StableLM {
-        /// Control the application of repeat penalty for the last n tokens
-        #[arg(long)]
-        repeat_last_n: Option<usize>,
-
-        #[arg(long)]
-        temperature: Option<f32>,
-
-        #[arg(long)]
-        penalty: Option<f32>,
-
-        #[arg(long)]
-        max_gen_tokens: Option<usize>,
-
-        #[arg(long)]
-        quant: Option<String>,
-    },
 }
 
 impl Display for ModelSelected {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ModelSelected::Llama { .. } => write!(f, "llama"),
             ModelSelected::Llama3 { .. } => write!(f, "llama3"),
-            ModelSelected::Phi2 { .. } => write!(f, "phi2"),
-            ModelSelected::Phi3 {
-                repeat_last_n: _,
-                temperature: _,
-                top_k: _,
-                top_p: _,
-                penalty: _,
-                max_gen_tokens: _,
-                quant: _,
-            } => write!(f, "phi3"),
-            ModelSelected::Qwen2 {
-                repeat_last_n: _,
-                temperature: _,
-                top_k: _,
-                top_p: _,
-                penalty: _,
-                max_gen_tokens: _,
-                quant: _,
-            } => write!(f, "qwen2"),
+            ModelSelected::Qwen2 { .. } => write!(f, "qwen2"),
             ModelSelected::Gemma { .. } => write!(f, "gemma"),
             ModelSelected::Mistral { .. } => write!(f, "mistral"),
-            ModelSelected::Yi { .. } => write!(f, "yi"),
-            ModelSelected::StableLM { .. } => write!(f, "stablelm"),
         }
     }
 }
@@ -262,31 +140,6 @@ pub fn get_model_loader(
     model_id: Option<String>,
 ) -> (Box<dyn ModelLoader>, String) {
     match selected_model {
-        ModelSelected::Llama {
-            repeat_last_n,
-            temperature,
-            penalty,
-            max_gen_tokens,
-            quant,
-        } => (
-            Box::new(DefaultLoader::new(
-                SpecificConfig::new(
-                    repeat_last_n,
-                    temperature,
-                    None,
-                    None,
-                    penalty,
-                    max_gen_tokens,
-                    quant,
-                ),
-                "llama".to_string(),
-            )),
-            if let Some(model_id) = model_id {
-                model_id
-            } else {
-                "meta-llama/Llama-2-7b-chat-hf".to_string()
-            },
-        ),
         ModelSelected::Llama3 {
             repeat_last_n,
             temperature,
@@ -310,58 +163,6 @@ pub fn get_model_loader(
                 model_id
             } else {
                 "meta-llama/Meta-Llama-3.1-8B-Instruct".to_string()
-            },
-        ),
-        ModelSelected::Phi2 {
-            repeat_last_n,
-            temperature,
-            penalty,
-            max_gen_tokens,
-            quant,
-        } => (
-            Box::new(DefaultLoader::new(
-                SpecificConfig::new(
-                    repeat_last_n,
-                    temperature,
-                    None,
-                    None,
-                    penalty,
-                    max_gen_tokens,
-                    quant,
-                ),
-                "phi2".to_string(),
-            )),
-            if let Some(model_id) = model_id {
-                model_id
-            } else {
-                "microsoft/microsoft/phi-2".to_string()
-            },
-        ),
-        ModelSelected::Phi3 {
-            repeat_last_n,
-            temperature,
-            top_k,
-            top_p,
-            penalty,
-            max_gen_tokens,
-            quant,
-        } => (
-            Box::new(DefaultLoader::new(
-                SpecificConfig::new(
-                    repeat_last_n,
-                    temperature,
-                    top_k,
-                    top_p,
-                    penalty,
-                    max_gen_tokens,
-                    quant,
-                ),
-                "phi3".to_string(),
-            )),
-            if let Some(model_id) = model_id {
-                model_id
-            } else {
-                "microsoft/Phi-3-mini-4k-instruct".to_string()
             },
         ),
         ModelSelected::Qwen2 {
@@ -439,58 +240,6 @@ pub fn get_model_loader(
                 model_id
             } else {
                 "mistralai/Mistral-7B-Instruct-v0.3".to_string()
-            },
-        ),
-
-        ModelSelected::Yi {
-            repeat_last_n,
-            temperature,
-            penalty,
-            max_gen_tokens,
-            quant,
-        } => (
-            Box::new(DefaultLoader::new(
-                SpecificConfig::new(
-                    repeat_last_n,
-                    temperature,
-                    None,
-                    None,
-                    penalty,
-                    max_gen_tokens,
-                    quant,
-                ),
-                "yi".to_string(),
-            )),
-            if let Some(model_id) = model_id {
-                model_id
-            } else {
-                "01-ai/Yi-6B-Chat".to_string()
-            },
-        ),
-
-        ModelSelected::StableLM {
-            repeat_last_n,
-            temperature,
-            penalty,
-            max_gen_tokens,
-            quant,
-        } => (
-            Box::new(DefaultLoader::new(
-                SpecificConfig::new(
-                    repeat_last_n,
-                    temperature,
-                    None,
-                    None,
-                    penalty,
-                    max_gen_tokens,
-                    quant,
-                ),
-                "stablelm".to_string(),
-            )),
-            if let Some(model_id) = model_id {
-                model_id
-            } else {
-                "stabilityai/stablelm-zephyr-3b".to_string()
             },
         ),
     }

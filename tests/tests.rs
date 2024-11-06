@@ -20,14 +20,14 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 #[tokio::test]
 async fn test_llama() -> Result<(), APIError> {
     let (loader, model_id) = get_model_loader(
-        ModelSelected::Llama {
+        ModelSelected::Llama3 {
             repeat_last_n: Some(64),
             penalty: Some(1.1),
             temperature: None,
             max_gen_tokens: Some(512),
             quant: None,
         },
-        Some("meta-llama/Llama-2-7b-chat-hf".to_string()),
+        Some("meta-llama/Llama-3.1-7b-chat-hf".to_string()),
     );
     let paths = loader.download_model(
         model_id,
