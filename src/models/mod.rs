@@ -3,6 +3,8 @@ pub mod linear;
 pub mod llama;
 pub mod mistral;
 pub mod qwen2;
+pub mod utils;
+
 use crate::SpecificConfig;
 use candle_core::DType;
 use either::Either;

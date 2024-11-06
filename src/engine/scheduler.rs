@@ -80,7 +80,7 @@ impl Scheduler {
                 match can_allocate {
                     AllocStatus::Later => break, //If we can only allocate later, do not bother iterating over the rest.
                     AllocStatus::Impossible => {
-                        println!(
+                        tracing::info!(
                             "Input prompt with length of {} tokens is too long and exceeds capacity of block engine.",
                             seq_group.get_prompt_len()
                         );
@@ -209,9 +209,7 @@ impl Scheduler {
             self._free(&group);
         }
     }
-}
 
-impl Scheduler {
     fn remove_seq_group(&mut self, seq_group: &SequenceGroup) {
         // Remove it if it is in waiting
         if let Some(idx) = self
@@ -302,6 +300,7 @@ impl Scheduler {
         self.block_engine.allocate(seq_group)
     }
 
+    // Free the sequence group when it is finished.
     fn _free(&mut self, seq_group: &SequenceGroup) {
         for seq in seq_group.get_seqs().values() {
             self.block_engine.free_sequence(seq);

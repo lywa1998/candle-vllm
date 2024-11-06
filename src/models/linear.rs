@@ -248,7 +248,7 @@ pub fn qlinear(
                     || (cfg.desc_act.is_some() && cfg.desc_act.unwrap() == true)
                 {
                     //only model with 4-bit and desc_act==false can be repacked to marlin format
-                    println!("The current GPTQ model does no compatible with marlin format because one of the following conditions: !cfg.sym || cfg.bits != 4 || (cfg.group_size != 128 && cfg.group_size != -1) || (cfg.desc_act == true)");
+                    tracing::info!("The current GPTQ model does no compatible with marlin format because one of the following conditions: !cfg.sym || cfg.bits != 4 || (cfg.group_size != 128 && cfg.group_size != -1) || (cfg.desc_act == true)");
                     //conventional gptq format
                     Ok(Linear {
                         weight: ws,

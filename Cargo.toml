@@ -43,6 +43,8 @@ range-checked = { git = "https://github.com/EricLBuehler/range-checked.git", ver
 either = { version = "1.13.0", features = ["serde"] }
 dirs = "5.0.1"
 kernels = {path = "./kernels", version="0.1.0"}
+thiserror = "2.0.0"
+tracing-subscriber = "0.3.18"
 
 [features]
 default = ["cuda"]

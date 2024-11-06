@@ -5,7 +5,8 @@ use std::sync::Arc;
 use tokenizers::{EncodeInput, Encoding, Tokenizer};
 use tokio::sync::{Mutex, Notify};
 
-use self::{pipelines::llm_engine::LLMEngine, responses::APIError};
+use self::responses::APIError;
+use crate::engine::llm_engine::LLMEngine;
 
 pub mod requests;
 pub mod responses;
@@ -52,5 +53,4 @@ pub struct OpenAIServerData {
 
 pub mod conversation;
 pub mod logits_processor;
-pub mod pipelines;
 pub mod utils;

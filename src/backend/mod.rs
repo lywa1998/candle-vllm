@@ -2,6 +2,19 @@ mod cache;
 pub mod gptq;
 mod paged_attention;
 
+use crate::error::{Error, Result};
+pub use cache::*;
+use candle_core::{
+    cuda_backend::cudarc::driver::{CudaFunction, DeviceRepr},
+    CudaDevice, DType,
+};
+pub use gptq::*;
+pub use paged_attention::*;
+pub use std::ops::Deref;
+use std::{
+    marker::PhantomData,
+    ptr::{addr_of, NonNull},
+};
 const COPY_BLOCKS_KERNEL_NAME: &str = "copy_blocks_kernel";
 
 pub fn get_or_load_func(
@@ -10,7 +23,7 @@ pub fn get_or_load_func(
     dtype: DType,
     suffix: Option<&str>,
     device: &CudaDevice,
-) -> Result<CudaFunction, APIError> {
+) -> Result<CudaFunction> {
     let spec = match dtype {
         DType::U8 => "_u8",
         DType::U32 => "_u32",
@@ -28,7 +41,7 @@ pub fn get_or_load_func(
     let kernel = kernel_base.to_owned() + &spec;
     device
         .get_or_load_func(&kernel, ptx_file)
-        .map_err(APIError::from)
+        .map_err(|err| Error::Other(err.to_string()))
 }
 
 #[repr(transparent)]
@@ -57,18 +70,3 @@ unsafe impl<'a, T, R> DeviceRepr for Conjoined<'a, T, R> {
         addr_of!(self.raw) as *mut _
     }
 }
-
-pub use cache::*;
-use candle_core::{
-    cuda_backend::cudarc::driver::{CudaFunction, DeviceRepr},
-    CudaDevice, DType,
-};
-pub use gptq::*;
-pub use paged_attention::*;
-pub use std::ops::Deref;
-use std::{
-    marker::PhantomData,
-    ptr::{addr_of, NonNull},
-};
-
-use crate::openai::responses::APIError;

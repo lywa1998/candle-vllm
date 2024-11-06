@@ -140,7 +140,7 @@ pub async fn chat_completions(
     }
     let token_ids: Encoding = token_ids.unwrap();
 
-    println!("\n\n\nPrompt {:?}", prompt);
+    tracing::info!("\n\n\nPrompt {:?}", prompt);
 
     let request_id = format!("cmpl-{}", Uuid::new_v4());
 

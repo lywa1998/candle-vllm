@@ -1,10 +1,8 @@
+use crate::error::{Error, Result};
+
 use std::{collections::HashMap, iter::zip, ptr::NonNull};
 
-use crate::{
-    backend::{get_or_load_func, Conjoined},
-    openai::responses::APIError,
-    try_api,
-};
+use crate::backend::{get_or_load_func, Conjoined};
 use candle_core::cuda_backend::CudaStorageSlice;
 use candle_core::{
     cuda_backend::cudarc::driver::{CudaSlice, DevicePtr, LaunchAsync, LaunchConfig},
@@ -20,20 +18,20 @@ pub unsafe fn copy_blocks(
     key_caches: Vec<&mut Tensor>,
     value_caches: Vec<&mut Tensor>,
     block_mapping: HashMap<usize, Vec<usize>>,
-) -> Result<(), APIError> {
+) -> Result<()> {
     let cache_dev = key_caches.first().unwrap().device();
     let Device::Cuda(dev) = cache_dev else {
         panic!("Expected the key caches to be on a CUDA device.")
     };
     if !cache_dev.same_device(value_caches.first().unwrap().device()) {
-        return Err(APIError::new(format!(
+        return Err(Error::Other(format!(
             "`key` and `value` caches have different devices, got {:?} and {:?} respectively.",
             cache_dev,
             value_caches.first().unwrap().device()
         )));
     }
     if key_caches.first().unwrap().dtype() != value_caches.first().unwrap().dtype() {
-        return Err(APIError::new(format!(
+        return Err(Error::Other(format!(
             "Key and value caches have different types, got {:?} and {:?}.",
             key_caches.first().unwrap().dtype(),
             value_caches.first().unwrap().dtype()
@@ -49,8 +47,8 @@ pub unsafe fn copy_blocks(
     let mut value_cache_ptrs = Vec::new();
     value_cache_ptrs.reserve_exact(num_layers as usize);
     for (key_cache, value_cache) in zip(&key_caches, &value_caches) {
-        try_api!(key_cache.to_device(cache_dev));
-        try_api!(value_cache.to_device(cache_dev));
+        key_cache.to_device(cache_dev)?;
+        value_cache.to_device(cache_dev)?;
 
         let key_offset: u64 = key_cache
             .storage_and_layout()
@@ -92,8 +90,8 @@ pub unsafe fn copy_blocks(
                 (ptr_key, ptr_value)
             }
             _ => {
-                return Err(APIError::from(
-                    "only f32, f16 and bf16 input data type supported!",
+                return Err(Error::Other(
+                    "only f32, f16 and bf16 input data type supported!".to_string(),
                 ));
             }
         };
@@ -123,7 +121,10 @@ pub unsafe fn copy_blocks(
         &mut value_cache_ptrs,
     );
 
-    let numel_per_block: u32 = try_api!(key_caches.first().unwrap().i(0))
+    let numel_per_block: u32 = key_caches
+        .first()
+        .unwrap()
+        .i(0)?
         .shape()
         .dims()
         .iter()
@@ -135,17 +136,19 @@ pub unsafe fn copy_blocks(
         block_dim: (numel_per_block.min(1024), 1u32, 1u32),
         shared_mem_bytes: 0,
     };
-    let stream = try_api!(dev.fork_default_stream());
+    let stream = dev
+        .fork_default_stream()
+        .map_err(|err| Error::Other(err.to_string()))?;
 
-    let kernel = try_api!(get_or_load_func(
+    let kernel = get_or_load_func(
         COPY_BLOCKS_KERNEL,
         COPY_BLOCKS_KERNEL_NAME,
         key_caches.first().unwrap().dtype(),
         None,
         dev,
-    ));
+    )?;
 
-    try_api!(unsafe {
+    unsafe {
         kernel.launch_on_stream(
             &stream,
             launch_conf,
@@ -156,7 +159,8 @@ pub unsafe fn copy_blocks(
                 numel_per_block as i32,
             ),
         )
-    });
+    }
+    .map_err(|err| Error::Other(err.to_string()))?;
 
     Ok(())
 }
@@ -165,12 +169,12 @@ pub fn swap_blocks(
     src: Tensor,
     dst: &mut Tensor,
     block_mapping: HashMap<usize, usize>,
-) -> Result<(), APIError> {
+) -> Result<()> {
     let block_size_in_bytes = src.dtype().size_in_bytes() * src.dims()[0];
     match (src.device(), dst.device()) {
         (Device::Cuda(src_dev), Device::Cuda(dst_dev)) => {
             if src_dev.ordinal() != dst_dev.ordinal() {
-                return Err(APIError::new(format!("Tensors must be on the same device to copy, got ordinals {} (src) and {} (dst).", src_dev.ordinal(), dst_dev.ordinal())))
+                return Err(Error::Other(format!("Tensors must be on the same device to copy, got ordinals {} (src) and {} (dst).", src_dev.ordinal(), dst_dev.ordinal())))
             }
             let (src_storage, src_layout) = src.storage_and_layout();
             let (dst_storage, dst_layout) = dst.storage_and_layout();
@@ -195,7 +199,7 @@ pub fn swap_blocks(
                     (ptr_src, ptr_dst)
                 }
                 _ => {
-                    return Err(APIError::from("only f32, f16 and bf16 input data type supported!"));
+                    return Err(Error::Other("only f32, f16 and bf16 input data type supported!".to_string()));
                 }
             };
             // let src_ptr = src_storage.as_cuda_slice::<u8>().map_err(APIError::from)?.device_ptr() + TryInto::<u64>::try_into(src_layout.start_offset()).unwrap();
@@ -208,7 +212,8 @@ pub fn swap_blocks(
                 let src_slice: CudaSlice<u8> = unsafe { src_dev.upgrade_device_ptr(src_ptr+src_offset, block_size_in_bytes) };
                 let mut dst_slice = unsafe { dst_dev.upgrade_device_ptr(dst_ptr+dst_offset, block_size_in_bytes) };
 
-                try_api!(src_dev.dtod_copy(&src_slice, &mut dst_slice));
+                src_dev.dtod_copy(&src_slice, &mut dst_slice)
+                    .map_err(|err| Error::Other(err.to_string()))?;
             }
         }
         (Device::Cpu, Device::Cuda(dst_dev)) => {
@@ -218,8 +223,8 @@ pub fn swap_blocks(
             assert!(matches!(&*dst_storage, Storage::Cuda(_)));
             let Storage::Cpu(src_storage) = &*src_storage else { unreachable!() };
             let Storage::Cuda(dst_storage) = &*dst_storage else { unreachable!() };
-            let dst_ptr = dst_storage.as_cuda_slice::<u8>().map_err(APIError::from)?.device_ptr() + TryInto::<u64>::try_into(dst_layout.start_offset()).unwrap();
-            let src_slice = try_api!(src_storage.as_slice());
+            let dst_ptr = dst_storage.as_cuda_slice::<u8>().map_err(|err| Error::Other(err.to_string()))?.device_ptr() + TryInto::<u64>::try_into(dst_layout.start_offset()).unwrap();
+            let src_slice = src_storage.as_slice()?;
 
             for (src_block_number, dst_block_number) in block_mapping {
                 let src_offset = src_block_number * block_size_in_bytes;
@@ -227,11 +232,12 @@ pub fn swap_blocks(
                 // u8s because we copy by bytes
                 let mut dst_slice: CudaSlice<u8> = unsafe { dst_dev.upgrade_device_ptr(dst_ptr+dst_offset, block_size_in_bytes) };
 
-                try_api!(dst_dev.htod_sync_copy_into(&src_slice[src_offset..src_offset+block_size_in_bytes], &mut dst_slice));
+                dst_dev.htod_sync_copy_into(&src_slice[src_offset..src_offset+block_size_in_bytes], &mut dst_slice)
+                    .map_err(|err| Error::Other(err.to_string()))?;
             }
         }
         (src, dst) => {
-            return Err(APIError::new(format!("Tensors must be on either the GPU or CPU to swap,, got {src:?} (src) and {dst:?} (dst).")))
+            return Err(Error::Other(format!("Tensors must be on either the GPU or CPU to swap,, got {src:?} (src) and {dst:?} (dst).")))
         }
     }
 

@@ -1,3 +1,5 @@
+use crate::error::Result;
+
 use std::{
     collections::{HashMap, VecDeque},
     iter::zip,
@@ -6,23 +8,21 @@ use std::{
 
 use super::{ModulePipeline, _make_tensor_with_pad};
 use crate::openai::streaming::ChatResponse;
-use crate::scheduler::Scheduler;
 use crate::{
+    engine::{
+        cache_engine::{CacheConfig, CacheEngine},
+        sequence::{Sequence, SequenceGroup, _Sequence},
+        Scheduler, SchedulerConfig, SchedulerOutput,
+    },
     openai::{
         responses::{
-            APIError, ChatChoice, ChatChoiceData, ChatCompletionChunk, ChatCompletionUsageResponse,
-            Choice, ChoiceData, WrapperLogprobs,
+            ChatChoice, ChatChoiceData, ChatCompletionChunk, ChatCompletionUsageResponse, Choice,
+            ChoiceData, WrapperLogprobs,
         },
         sampling_params::SamplingParams,
         utils::get_created_time_secs,
     },
     paged_attention::input_metadata::InputMetadata,
-    scheduler::{
-        cache_engine::{CacheConfig, CacheEngine},
-        sequence::{Sequence, SequenceGroup, _Sequence},
-        SchedulerConfig, SchedulerOutput,
-    },
-    try_api,
 };
 use candle_core::Tensor;
 use either::Either;
@@ -60,7 +60,7 @@ impl LLMEngine {
         cache_config: CacheConfig,
         notify: Arc<Notify>,
         finish_notify: Arc<Notify>,
-    ) -> Result<Arc<Mutex<Self>>, APIError> {
+    ) -> Result<Arc<Mutex<Self>>> {
         let cache_engine = CacheEngine::new(
             pipeline.get_model_config(),
             cache_config.clone(),
@@ -119,14 +119,14 @@ impl LLMEngine {
                             .unwrap_or(0),
                     };
 
-                    println!(
+                    tracing::info!(
                         "\r\n [{} requests] Prefilling: {} prompt tokens processed in {} seconds",
                         result.len(),
                         overall_usage.prompt_tokens,
                         overall_usage.prompt_time_costs / 1000
                     );
 
-                    println!(
+                    tracing::info!(
                         "\r\n [{} requests] Decoding: {} tokens processed in {} seconds ({} tokens/s)",
                         result.len(),
                         overall_usage.completion_tokens,
@@ -183,7 +183,7 @@ impl LLMEngine {
 
     pub fn generate_once(
         &mut self,
-    ) -> Result<HashMap<String, (Vec<ChatChoice>, ChatCompletionUsageResponse)>, APIError> {
+    ) -> Result<HashMap<String, (Vec<ChatChoice>, ChatCompletionUsageResponse)>> {
         let mut responses =
             HashMap::<String, (Vec<ChatChoice>, ChatCompletionUsageResponse)>::new();
         let mut prompt_finish_times = HashMap::<usize, SystemTime>::new();
@@ -238,7 +238,7 @@ impl LLMEngine {
                             );
                             let ret = sender.send(ChatResponse::Chunk(chunk));
                             if ret.is_err() {
-                                println!("Send stream response error!");
+                                tracing::error!("Send stream response error!");
                                 seq.deref_mut().set_finish_reason("Abort".to_string());
                                 break;
                             }
@@ -274,7 +274,7 @@ impl LLMEngine {
                         .as_millis();
                     let seq = group.get_seqs().values().nth(0).unwrap();
                     let decoded_tokens = seq.deref().get_len() - seq.deref().get_prompt_len();
-                    println!(
+                    tracing::info!(
                         "Request {} decoding {} tokens finished in {} seconds",
                         group.request_id,
                         decoded_tokens,
@@ -355,32 +355,23 @@ impl LLMEngine {
 }
 
 impl LLMEngine {
-    fn execute_scheduler_ops(
-        &mut self,
-        scheduler_output: &SchedulerOutput,
-    ) -> Result<(), APIError> {
+    fn execute_scheduler_ops(&mut self, scheduler_output: &SchedulerOutput) -> Result<()> {
         if !scheduler_output.blocks_to_swap_in.is_empty() {
-            try_api!(self
-                .cache_engine
-                .swap_in(scheduler_output.blocks_to_swap_in.clone()));
+            self.cache_engine
+                .swap_in(scheduler_output.blocks_to_swap_in.clone())?;
         }
         if !scheduler_output.blocks_to_swap_out.is_empty() {
-            try_api!(self
-                .cache_engine
-                .swap_out(scheduler_output.blocks_to_swap_out.clone()));
+            self.cache_engine
+                .swap_out(scheduler_output.blocks_to_swap_out.clone())?;
         }
         if !scheduler_output.blocks_to_copy.is_empty() {
-            try_api!(self
-                .cache_engine
-                .copy(scheduler_output.blocks_to_copy.clone()));
+            self.cache_engine
+                .copy(scheduler_output.blocks_to_copy.clone())?;
         }
         Ok(())
     }
 
-    fn prepare_prompt(
-        &self,
-        groups: &VecDeque<Arc<SequenceGroup>>,
-    ) -> Result<PreparedInputs, APIError> {
+    fn prepare_prompt(&self, groups: &VecDeque<Arc<SequenceGroup>>) -> Result<PreparedInputs> {
         let mut prompt_lens = Vec::new();
         let mut input_tokens = Vec::new();
         let mut input_positions = Vec::new();
@@ -478,10 +469,7 @@ impl LLMEngine {
         })
     }
 
-    fn prepare_decode(
-        &self,
-        groups: &VecDeque<Arc<SequenceGroup>>,
-    ) -> Result<PreparedInputs, APIError> {
+    fn prepare_decode(&self, groups: &VecDeque<Arc<SequenceGroup>>) -> Result<PreparedInputs> {
         let mut input_tokens = Vec::new();
         let mut input_positions = Vec::new();
         let mut context_lens = Vec::new();
@@ -550,11 +538,11 @@ impl LLMEngine {
             _make_tensor_with_pad(slot_mappings, 1, _PAD_SLOT_ID, self.pipeline.device())?;
 
         let max_context_len = context_lens.iter().max().unwrap();
-        let context_lens = try_api!(Tensor::from_vec(
+        let context_lens = Tensor::from_vec(
             context_lens.iter().map(|x| *x as u32).collect::<Vec<_>>(),
             (context_lens.len(),),
             self.pipeline.device(),
-        ));
+        )?;
 
         let max_block_table_len = block_tables.iter().map(|x| x.len()).max().unwrap();
         let block_tables = _make_tensor_with_pad(
@@ -566,7 +554,7 @@ impl LLMEngine {
             0,
             self.pipeline.device(),
         )?;
-        let block_tables = try_api!(block_tables.reshape(((), max_block_table_len)));
+        let block_tables = block_tables.reshape(((), max_block_table_len))?;
         Ok(PreparedInputs {
             tokens: input_tokens,
             positions: input_positions,
@@ -617,7 +605,7 @@ impl LLMEngine {
         self.group_id += 1;
 
         self.scheduler.add_sequence(seq_group);
-        println!(
+        tracing::info!(
             "Request {} with length {} added to sequence group.",
             request_id.clone(),
             prompt_len

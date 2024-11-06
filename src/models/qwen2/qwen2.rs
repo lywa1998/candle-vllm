@@ -1,6 +1,6 @@
-use super::{
+use crate::models::{
     linear::{linear_no_bias_x as linear_no_bias, linear_x as linear, LinearX as Linear},
-    Config, QuantConfig,
+    Config, QuantConfig, TokenID,
 };
 use crate::paged_attention::input_metadata::InputMetadata;
 use crate::paged_attention::PagedAttention;
@@ -52,8 +52,8 @@ impl QwenConfig {
             rms_norm_eps: self.rms_norm_eps,
             rope_theta: self.rope_theta,
             use_flash_attn,
-            bos_token_id: super::TokenID(Either::Left(Some(self.bos_token_id as u32))),
-            eos_token_id: super::TokenID(Either::Left(Some(self.bos_token_id as u32))),
+            bos_token_id: TokenID(Either::Left(Some(self.bos_token_id as u32))),
+            eos_token_id: TokenID(Either::Left(Some(self.bos_token_id as u32))),
             max_seq_len: self.max_position_embeddings,
             sliding_window: Some(self.sliding_window),
             hidden_act: Some(self.hidden_act),

@@ -4,33 +4,24 @@ use std::iter::zip;
 
 use candle_core::{DType, Device, Shape, Tensor};
 
-use crate::openai::responses::APIError;
+use crate::error::{Error, Result};
 
 use crate::paged_attention::utils;
-use crate::try_api;
 
 pub trait AttentionBiasBlockDiagonal {
     /// Queries and Keys are each divided into the same number of blocks.
     /// A query Q in block i cannot attend to a key which is not in block i,
     /// nor one which is farther from the initial key in block i than Q
     /// is from the initial query in block i.
-    fn materialize(
-        &self,
-        shape: &Shape,
-        dtype: DType,
-        device: &Device,
-    ) -> Result<Tensor, APIError> {
+    fn materialize(&self, shape: &Shape, dtype: DType, device: &Device) -> Result<Tensor> {
         let mut mask =
-            try_api!(
-                try_api!(Tensor::zeros(&shape.dims().to_vec()[2..], dtype, device,))
-                    .to_dtype(dtype)
-            );
+            Tensor::zeros(&shape.dims().to_vec()[2..], dtype, device)?.to_dtype(dtype)?;
 
         for ((q_start, q_end), (k_start, k_end)) in zip(
             self.get_q_seqinfo().intervals(),
             self.get_k_seqinfo().intervals(),
         ) {
-            try_api!(mask.slice_assign(
+            mask.slice_assign(
                 &[
                     q_start as usize..q_end as usize,
                     k_start as usize..k_end as usize,
@@ -40,30 +31,25 @@ pub trait AttentionBiasBlockDiagonal {
                     dtype,
                     device,
                 )?,
-            ));
+            )?;
         }
 
         for _ in 0..shape.dims().len() - 2 {
-            mask = try_api!(mask.unsqueeze(0));
+            mask = mask.unsqueeze(0)?;
         }
-        mask.expand(shape).map_err(APIError::from)
+        mask.expand(shape).map_err(|err| Error::Candle(err))
     }
 
     fn get_q_seqinfo(&self) -> &SeqLenInfo;
 
     fn get_k_seqinfo(&self) -> &SeqLenInfo;
 
-    fn _create_block_mask(
-        &self,
-        shape: &Shape,
-        dtype: DType,
-        device: &Device,
-    ) -> Result<Tensor, APIError>;
+    fn _create_block_mask(&self, shape: &Shape, dtype: DType, device: &Device) -> Result<Tensor>;
 
     fn make_local_attention(
         &self,
         _window_size: usize,
-    ) -> Result<Box<dyn AttentionBiasBlockDiagonal>, APIError> {
+    ) -> Result<Box<dyn AttentionBiasBlockDiagonal>> {
         unimplemented!();
     }
 }
@@ -78,7 +64,7 @@ impl SeqLenInfo {
         Self { seqstart_py }
     }
 
-    fn from_seqlens<'a>(seqlens: impl Iterator<Item = &'a u32>) -> Result<Self, APIError> {
+    fn from_seqlens<'a>(seqlens: impl Iterator<Item = &'a u32>) -> Result<Self> {
         let mut seqstart_py = vec![0];
         for seqlen in seqlens.into_iter() {
             seqstart_py.push(seqstart_py[seqstart_py.len() - 1] + seqlen);
@@ -112,26 +98,21 @@ impl BlockDiagonalCausalMask {
     pub fn from_seqlens(
         q_seqlen: Vec<u32>,
         kv_seqlen: Option<Vec<u32>>,
-    ) -> Result<Box<dyn AttentionBiasBlockDiagonal>, APIError> {
+    ) -> Result<Box<dyn AttentionBiasBlockDiagonal>> {
         assert!(kv_seqlen.is_none() || q_seqlen.len() == kv_seqlen.as_ref().unwrap().len());
-        let q_seqinfo = try_api!(SeqLenInfo::from_seqlens(q_seqlen.iter()));
+        let q_seqinfo = SeqLenInfo::from_seqlens(q_seqlen.iter())?;
         let k_seqinfo = if kv_seqlen.is_none() || &q_seqlen == kv_seqlen.as_ref().unwrap() {
             q_seqinfo.clone()
         } else {
-            try_api!(SeqLenInfo::from_seqlens(kv_seqlen.unwrap().iter()))
+            SeqLenInfo::from_seqlens(kv_seqlen.unwrap().iter())?
         };
         Ok(Box::new(Self::new(q_seqinfo, k_seqinfo, None)))
     }
 }
 
 impl AttentionBiasBlockDiagonal for BlockDiagonalCausalMask {
-    fn _create_block_mask(
-        &self,
-        shape: &Shape,
-        dtype: DType,
-        device: &Device,
-    ) -> Result<Tensor, APIError> {
-        Tensor::zeros(shape, dtype, device).map_err(APIError::from)
+    fn _create_block_mask(&self, shape: &Shape, dtype: DType, device: &Device) -> Result<Tensor> {
+        Tensor::zeros(shape, dtype, device).map_err(|err| Error::Candle(err))
     }
 
     fn get_k_seqinfo(&self) -> &SeqLenInfo {
@@ -145,7 +126,7 @@ impl AttentionBiasBlockDiagonal for BlockDiagonalCausalMask {
     fn make_local_attention(
         &self,
         window_size: usize,
-    ) -> Result<Box<dyn AttentionBiasBlockDiagonal>, APIError> {
+    ) -> Result<Box<dyn AttentionBiasBlockDiagonal>> {
         Ok(Box::new(BlockDiagonalCausalLocalAttentionMask::new(
             self.q_seqinfo.clone(),
             self.k_seqinfo.clone(),
@@ -179,12 +160,7 @@ impl BlockDiagonalCausalLocalAttentionMask {
 }
 
 impl AttentionBiasBlockDiagonal for BlockDiagonalCausalLocalAttentionMask {
-    fn _create_block_mask(
-        &self,
-        shape: &Shape,
-        dtype: DType,
-        device: &Device,
-    ) -> Result<Tensor, APIError> {
+    fn _create_block_mask(&self, shape: &Shape, dtype: DType, device: &Device) -> Result<Tensor> {
         utils::materialize_causal_mask(shape, dtype, device, Some(self._window_size), false)
     }
 
@@ -208,23 +184,16 @@ impl LowerTriangularMaskWithTensorBias {
 }
 
 impl AttentionBiasBlockDiagonal for LowerTriangularMaskWithTensorBias {
-    fn materialize(
-        &self,
-        shape: &Shape,
-        dtype: DType,
-        device: &Device,
-    ) -> Result<Tensor, APIError> {
-        (try_api!(utils::materialize_causal_mask(
-            shape, dtype, device, None, false
-        )) + &self.bias)
-            .map_err(APIError::from)
+    fn materialize(&self, shape: &Shape, dtype: DType, device: &Device) -> Result<Tensor> {
+        (utils::materialize_causal_mask(shape, dtype, device, None, false)? + &self.bias)
+            .map_err(|err| Error::Candle(err))
     }
     fn _create_block_mask(
         &self,
         _shape: &Shape,
         _dtype: DType,
         _device: &Device,
-    ) -> Result<Tensor, APIError> {
+    ) -> Result<Tensor> {
         unimplemented!("should not be called");
     }
     fn get_k_seqinfo(&self) -> &SeqLenInfo {
@@ -236,7 +205,7 @@ impl AttentionBiasBlockDiagonal for LowerTriangularMaskWithTensorBias {
     fn make_local_attention(
         &self,
         _window_size: usize,
-    ) -> Result<Box<dyn AttentionBiasBlockDiagonal>, APIError> {
+    ) -> Result<Box<dyn AttentionBiasBlockDiagonal>> {
         unimplemented!("should not be called");
     }
 }

@@ -1,3 +1,5 @@
+use crate::error::{Error, Result};
+
 use super::TokenOutputStream;
 use super::{get_token, ModelLoader, ModelPaths, ModulePipeline, TokenOrFinishReason};
 use crate::engine::sequence::SequenceGroup;
@@ -23,7 +25,7 @@ use crate::{
         PipelineConfig,
     },
     paged_attention::input_metadata::InputMetadata,
-    try_api, SpecificConfig,
+    SpecificConfig,
 };
 use candle_core::{DType, Device, IndexOp, Tensor};
 use candle_nn::VarBuilder;
@@ -93,26 +95,34 @@ impl ModelLoader for DefaultLoader {
         revision: Option<String>,
         hf_token: Option<String>,
         hf_token_path: Option<String>,
-    ) -> Result<Box<dyn ModelPaths>, APIError> {
-        let api = try_api!(ApiBuilder::new()
+    ) -> Result<Box<dyn ModelPaths>> {
+        let api = ApiBuilder::new()
             .with_progress(true)
             .with_token(Some(get_token(hf_token, hf_token_path)?))
-            .build());
+            .build()
+            .map_err(|err| Error::Other(err.to_string()))?;
         let revision = revision.unwrap_or("main".to_string());
         let api = api.repo(Repo::with_revision(model_id, RepoType::Model, revision));
 
-        let tokenizer_filename = try_api!(api.get("tokenizer.json"));
+        let tokenizer_filename = api
+            .get("tokenizer.json")
+            .map_err(|err| Error::Other(err.to_string()))?;
 
-        let config_filename = try_api!(api.get("config.json"));
+        let config_filename = api
+            .get("config.json")
+            .map_err(|err| Error::Other(err.to_string()))?;
 
         let mut filenames = vec![];
-        for rfilename in try_api!(api.info())
+        let repo_info = api.info().map_err(|err| Error::Other(err.to_string()))?;
+        for rfilename in repo_info
             .siblings
             .iter()
             .map(|x| x.rfilename.clone())
             .filter(|x| x.ends_with(".safetensors"))
         {
-            let filename = try_api!(api.get(&rfilename));
+            let filename = api
+                .get(&rfilename)
+                .map_err(|err| Error::Other(err.to_string()))?;
             filenames.push(filename);
         }
 
@@ -128,40 +138,38 @@ impl ModelLoader for DefaultLoader {
         paths: Box<dyn ModelPaths>,
         dtype: DType,
         device: Device,
-    ) -> Result<(Box<dyn ModulePipeline>, PipelineConfig), APIError> {
+    ) -> Result<(Box<dyn ModulePipeline>, PipelineConfig)> {
         let specific_args = self.config.clone();
 
+        let config_file_buf = std::fs::read(paths.get_config_filename())
+            .map_err(|err| Error::Other(err.to_string()))?;
         let config = match self.name.as_str() {
             "llama" | "llama3" => {
-                let config: LlamaConfig = try_api!(serde_json::from_slice(&try_api!(
-                    std::fs::read(paths.get_config_filename())
-                ),));
+                let config: LlamaConfig = serde_json::from_slice(&config_file_buf)
+                    .map_err(|err| Error::Other(err.to_string()))?;
                 config.into_config(false, dtype, &specific_args)
             }
             "qwen2" => {
-                let config: QwenConfig = try_api!(serde_json::from_slice(&try_api!(
-                    std::fs::read(paths.get_config_filename())
-                ),));
+                let config: QwenConfig = serde_json::from_slice(&config_file_buf)
+                    .map_err(|err| Error::Other(err.to_string()))?;
                 config.into_config(false, dtype, &specific_args)
             }
             "gemma" => {
-                let config: GemmaConfig = try_api!(serde_json::from_slice(&try_api!(
-                    std::fs::read(paths.get_config_filename())
-                ),));
+                let config: GemmaConfig = serde_json::from_slice(&config_file_buf)
+                    .map_err(|err| Error::Other(err.to_string()))?;
                 config.into_config(false, dtype, &specific_args)
             }
             "mistral" => {
-                let config: MistralConfig = try_api!(serde_json::from_slice(&try_api!(
-                    std::fs::read(paths.get_config_filename())
-                ),));
+                let config: MistralConfig = serde_json::from_slice(&config_file_buf)
+                    .map_err(|err| Error::Other(err.to_string()))?;
                 config.into_config(false, dtype, &specific_args)
             }
             _ => panic!("Model not supported!"),
         };
 
-        println!("Model {:?}", config);
+        tracing::info!("Model {:?}", config);
 
-        println!("Loading {} model.", self.name);
+        tracing::info!("Loading {} model.", self.name);
 
         let vb = match unsafe {
             VarBuilder::from_mmaped_safetensors(paths.get_weight_filenames(), dtype, &device)
@@ -172,23 +180,38 @@ impl ModelLoader for DefaultLoader {
 
         let (model, sep_style) = match self.name.as_str() {
             "llama" => (
-                LLMModel::Llama(try_api!(Llama::load(vb, &config, dtype, &device))),
+                LLMModel::Llama(
+                    Llama::load(vb, &config, dtype, &device)
+                        .map_err(|err| Error::Other(err.to_string()))?,
+                ),
                 SeparatorStyle::Llama,
             ),
             "llama3" => (
-                LLMModel::Llama(try_api!(Llama::load(vb, &config, dtype, &device))),
+                LLMModel::Llama(
+                    Llama::load(vb, &config, dtype, &device)
+                        .map_err(|err| Error::Other(err.to_string()))?,
+                ),
                 SeparatorStyle::Llama3,
             ),
             "qwen2" => (
-                LLMModel::Qwen2(try_api!(Qwen2::new(vb, &config, dtype, &device))),
+                LLMModel::Qwen2(
+                    Qwen2::new(vb, &config, dtype, &device)
+                        .map_err(|err| Error::Other(err.to_string()))?,
+                ),
                 SeparatorStyle::Qwen2,
             ),
             "gemma" => (
-                LLMModel::Gemma(try_api!(Gemma::new(vb, &config, dtype, &device))),
+                LLMModel::Gemma(
+                    Gemma::new(vb, &config, dtype, &device)
+                        .map_err(|err| Error::Other(err.to_string()))?,
+                ),
                 SeparatorStyle::Gemma,
             ),
             "mistral" => (
-                LLMModel::Mistral(try_api!(Mistral::new(vb, &config, dtype, &device))),
+                LLMModel::Mistral(
+                    Mistral::new(vb, &config, dtype, &device)
+                        .map_err(|err| Error::Other(err.to_string()))?,
+                ),
                 SeparatorStyle::Mistral,
             ),
             _ => panic!("Model not supported!"),
@@ -199,7 +222,7 @@ impl ModelLoader for DefaultLoader {
 
         let tokenizer = TokenOutputStream::new(tokenizer_);
 
-        println!("Done loading.");
+        tracing::info!("Done loading.");
 
         //max and min number of tokens generated per request
         let default_max_tokens = specific_args
@@ -215,7 +238,7 @@ impl ModelLoader for DefaultLoader {
             temperature: specific_args.temperature.unwrap_or(0.7),
         };
 
-        println!("{:?}", pipeline_config);
+        tracing::info!("{:?}", pipeline_config);
 
         let mut stop_token_ids = Vec::<u32>::new();
 
@@ -251,7 +274,7 @@ impl ModelLoader for DefaultLoader {
             }
         }
 
-        println!("{:?}", specific_args);
+        tracing::info!("{:?}", specific_args);
 
         let logits_processor = {
             let temperature = f64::from(pipeline_config.temperature);
@@ -305,7 +328,7 @@ impl ModulePipeline for DefaultPipeline {
         input_positions: &[Vec<usize>],
         kv_cache: Option<&Vec<(Tensor, Tensor)>>,
         mut input_metadata: InputMetadata,
-    ) -> Result<Tensor, APIError> {
+    ) -> candle_core::Result<Tensor> {
         let input_tokens = if input_tokens.shape().dims().len() < 2 {
             input_tokens
                 .reshape((1, input_tokens.shape().dims()[0]))
@@ -315,38 +338,30 @@ impl ModulePipeline for DefaultPipeline {
         };
 
         match &mut self.model {
-            LLMModel::Llama(llama) => llama
-                .forward(
-                    &input_tokens,
-                    input_positions,
-                    kv_cache,
-                    &mut input_metadata,
-                )
-                .map_err(APIError::from),
-            LLMModel::Qwen2(qwen2) => qwen2
-                .forward(
-                    &input_tokens,
-                    input_positions,
-                    kv_cache,
-                    &mut input_metadata,
-                )
-                .map_err(APIError::from),
-            LLMModel::Gemma(gemma) => gemma
-                .forward(
-                    &input_tokens,
-                    input_positions,
-                    kv_cache,
-                    &mut input_metadata,
-                )
-                .map_err(APIError::from),
-            LLMModel::Mistral(mistral) => mistral
-                .forward(
-                    &input_tokens,
-                    input_positions,
-                    kv_cache,
-                    &mut input_metadata,
-                )
-                .map_err(APIError::from),
+            LLMModel::Llama(llama) => llama.forward(
+                &input_tokens,
+                input_positions,
+                kv_cache,
+                &mut input_metadata,
+            ),
+            LLMModel::Qwen2(qwen2) => qwen2.forward(
+                &input_tokens,
+                input_positions,
+                kv_cache,
+                &mut input_metadata,
+            ),
+            LLMModel::Gemma(gemma) => gemma.forward(
+                &input_tokens,
+                input_positions,
+                kv_cache,
+                &mut input_metadata,
+            ),
+            LLMModel::Mistral(mistral) => mistral.forward(
+                &input_tokens,
+                input_positions,
+                kv_cache,
+                &mut input_metadata,
+            ),
         }
     }
 
@@ -354,7 +369,7 @@ impl ModulePipeline for DefaultPipeline {
         &mut self,
         logits: Tensor,
         groups: &VecDeque<Arc<SequenceGroup>>,
-    ) -> Result<Vec<TokenOrFinishReason>, APIError> {
+    ) -> Result<Vec<TokenOrFinishReason>> {
         use std::collections::HashMap;
         use std::sync::Mutex;
         let shared_result = Arc::new(Mutex::new(HashMap::<usize, TokenOrFinishReason>::new()));

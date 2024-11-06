@@ -1,85 +1,35 @@
+mod command;
+
+use command::{device, get_model_loader, hub_load_local_safetensors, Args};
+
+use std::path::Path;
+use std::sync::Arc;
+
 use axum::{
     http::{self, Method},
     routing::post,
     Router,
 };
 use candle_core::{DType, Device};
-use candle_vllm::engine::cache_engine::CacheConfig;
-use candle_vllm::engine::SchedulerConfig;
-use candle_vllm::openai::handlers::chat_completions;
-use candle_vllm::openai::pipelines::llm_engine::LLMEngine;
-use candle_vllm::openai::pipelines::pipeline::DefaultModelPaths;
-use candle_vllm::openai::responses::APIError;
-use candle_vllm::openai::OpenAIServerData;
-use candle_vllm::{device, get_model_loader, hub_load_local_safetensors, ModelSelected};
+use candle_vllm::{
+    engine::{
+        cache_engine::CacheConfig, llm_engine::LLMEngine, pipeline::DefaultModelPaths,
+        SchedulerConfig,
+    },
+    error::Result,
+    models::Config,
+    openai::{handlers::chat_completions, responses::APIError, OpenAIServerData},
+};
 use clap::Parser;
-use std::sync::Arc;
-const SIZE_IN_MB: usize = 1024 * 1024;
-use candle_vllm::models::Config;
-use std::path::Path;
 use tokio::sync::Notify;
 use tower_http::cors::{AllowOrigin, CorsLayer};
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    /// Huggingface token environment variable (optional). If not specified, load using hf_token_path.
-    #[arg(long)]
-    hf_token: Option<String>,
 
-    /// Huggingface token file (optional). If neither `hf_token` or `hf_token_path` are specified this is used with the value
-    /// of `~/.cache/huggingface/token`
-    #[arg(long)]
-    hf_token_path: Option<String>,
-
-    /// Port to serve on (localhost:port)
-    #[arg(long)]
-    port: u16,
-
-    /// Set verbose mode (print all requests)
-    #[arg(long)]
-    verbose: bool,
-
-    #[clap(subcommand)]
-    command: ModelSelected,
-
-    /// Maximum number of sequences to allow
-    #[arg(long, default_value_t = 256)]
-    max_num_seqs: usize,
-
-    /// Size of a block
-    #[arg(long, default_value_t = 32)]
-    block_size: usize,
-
-    /// if weight_path is passed, it will ignore the model_id
-    #[arg(long)]
-    model_id: Option<String>,
-
-    /// The folder name that contains safetensor weights and json files
-    /// (same structure as huggingface online), path must include last "/"
-    #[arg(long)]
-    weight_path: Option<String>,
-
-    #[arg(long)]
-    dtype: Option<String>,
-
-    #[arg(long, default_value_t = false)]
-    cpu: bool,
-
-    /// Available GPU memory for kvcache (MB)
-    #[arg(long, default_value_t = 4096)]
-    kvcache_mem_gpu: usize,
-
-    /// Available CPU memory for kvcache (MB)
-    #[arg(long, default_value_t = 4096)]
-    kvcache_mem_cpu: usize,
-
-    /// Record conversation (default false, the client need to record chat history)
-    #[arg(long)]
-    record_conversation: bool,
-}
+const SIZE_IN_MB: usize = 1024 * 1024;
 
 #[tokio::main]
-async fn main() -> Result<(), APIError> {
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
+
     let args = Args::parse();
     let (loader, model_id) = get_model_loader(args.command, args.model_id.clone());
 
@@ -109,7 +59,7 @@ async fn main() -> Result<(), APIError> {
                     //also no token cache
                     use std::io::Write;
                     let mut input_token = String::new();
-                    println!("Please provide your huggingface token to download model:\n");
+                    tracing::info!("Please provide your huggingface token to download model:\n");
                     std::io::stdin()
                         .read_line(&mut input_token)
                         .expect("Failed to read token!");
@@ -155,7 +105,7 @@ async fn main() -> Result<(), APIError> {
         fully_init: true,
         dtype: config.kv_cache_dtype,
     };
-    println!("Cache config {:?}", cache_config);
+    tracing::info!("Cache config {:?}", cache_config);
     let finish_notify = Arc::new(Notify::new());
     let llm_engine = LLMEngine::new(
         model.0,
