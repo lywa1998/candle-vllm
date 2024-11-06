@@ -16,7 +16,6 @@ rand = "0.8.5"
 rayon="1.10.0"
 hyper = { version = "0.14", features = ["full"] }
 candle-core = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
-candle-examples = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
 #candle-lora = { git = "https://github.com/EricLBuehler/candle-lora.git", version = "0.2.0" }
 #candle-lora-macro = { git = "https://github.com/EricLBuehler/candle-lora.git", version = "0.2.0" }
 #candle-lora-transformers = { git = "https://github.com/EricLBuehler/candle-lora.git", version = "0.2.0" }
@@ -37,7 +36,7 @@ candle-flash-attn = { git = "https://github.com/huggingface/candle.git", version
 clap = { version = "4.4.7", features = ["derive"] }
 #candle-sampling = { git = "https://github.com/EricLBuehler/candle-sampling.git", version = "0.2.0" }
 futures = "0.3.29"
-tokio = { version = "1.38.0", features = ["sync"] }
+tokio = { version = "1.38.0", features = ["sync", "rt-multi-thread", "macros"] }
 env_logger = "0.10.1"
 tracing = "0.1.40"
 range-checked = { git = "https://github.com/EricLBuehler/range-checked.git", version = "0.1.0" }
@@ -54,5 +53,5 @@ flash-attn = ["cuda", "candle-transformers/flash-attn"]
 mkl = ["dep:intel-mkl-src", "candle-core/mkl", "candle-nn/mkl", "candle-transformers/mkl"]
 nccl = ["cuda", "cudarc/nccl"]
 
-[lints.rust]
-unused = "allow"
+# [lints.rust]
+# unused = "allow"

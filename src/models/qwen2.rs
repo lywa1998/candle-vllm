@@ -1,35 +1,40 @@
-use super::{Config, QuantConfig};
-use crate::openai::models::linear::{linear_no_bias_x as linear_no_bias, LinearX as Linear};
+use super::{
+    linear::{linear_no_bias_x as linear_no_bias, linear_x as linear, LinearX as Linear},
+    Config, QuantConfig,
+};
 use crate::paged_attention::input_metadata::InputMetadata;
 use crate::paged_attention::PagedAttention;
 use crate::SpecificConfig;
-use candle_core::{DType, Device, IndexOp, Module, Result, Tensor};
-use candle_nn::{Activation, VarBuilder};
+use candle::{DType, Device, IndexOp, Module, Result, Tensor};
+use candle_core as candle;
+use candle_nn::VarBuilder;
 use candle_transformers::models::with_tracing::RmsNorm;
 use either::Either;
 use std::iter::zip;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
-pub struct MistralConfig {
+pub struct QwenConfig {
     pub vocab_size: usize,
     pub hidden_size: usize,
     pub intermediate_size: usize,
     pub num_hidden_layers: usize,
     pub num_attention_heads: usize,
     pub num_key_value_heads: usize,
-    pub hidden_act: Activation,
     pub max_position_embeddings: usize,
-    pub rms_norm_eps: f64,
+    pub sliding_window: usize,
+    pub max_window_layers: usize,
+    pub tie_word_embeddings: bool, //shared weights between input/output embeddings
     pub rope_theta: f64,
-    pub sliding_window: Option<usize>,
+    pub rms_norm_eps: f64,
+    pub use_sliding_window: bool,
+    pub hidden_act: candle_nn::Activation,
     pub bos_token_id: usize,
     pub eos_token_id: usize,
-    pub tie_word_embeddings: Option<bool>,
     pub quantization_config: Option<QuantConfig>,
 }
 
-impl MistralConfig {
+impl QwenConfig {
     pub fn into_config(
         self,
         use_flash_attn: bool,
@@ -48,11 +53,11 @@ impl MistralConfig {
             rope_theta: self.rope_theta,
             use_flash_attn,
             bos_token_id: super::TokenID(Either::Left(Some(self.bos_token_id as u32))),
-            eos_token_id: super::TokenID(Either::Left(Some(self.eos_token_id as u32))),
+            eos_token_id: super::TokenID(Either::Left(Some(self.bos_token_id as u32))),
             max_seq_len: self.max_position_embeddings,
-            sliding_window: self.sliding_window,
+            sliding_window: Some(self.sliding_window),
             hidden_act: Some(self.hidden_act),
-            tie_word_embeddings: self.tie_word_embeddings.unwrap_or(false),
+            tie_word_embeddings: self.tie_word_embeddings,
             rope_scaling: None,
             original_max_position_embeddings: None,
             attention_bias: false,
@@ -77,12 +82,11 @@ struct RotaryEmbedding {
 
 impl RotaryEmbedding {
     fn new(_dtype: DType, cfg: &Config, dev: &Device) -> Result<Self> {
-        let rope_theta = cfg.rope_theta as f32;
         let dim = cfg.hidden_size / cfg.num_attention_heads;
         let max_seq_len = cfg.max_seq_len;
         let inv_freq: Vec<_> = (0..dim)
             .step_by(2)
-            .map(|i| 1f32 / rope_theta.powf(i as f32 / dim as f32))
+            .map(|i| 1f32 / cfg.rope_theta.powf(i as f64 / dim as f64) as f32)
             .collect();
         let inv_freq_len = inv_freq.len();
         let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?.to_dtype(DType::F32)?;
@@ -90,7 +94,6 @@ impl RotaryEmbedding {
             .to_dtype(DType::F32)?
             .reshape((max_seq_len, 1))?;
         let freqs = t.matmul(&inv_freq)?;
-
         Ok(Self {
             sin: freqs.sin()?,
             cos: freqs.cos()?,
@@ -129,7 +132,7 @@ struct MLP {
     gate_proj: Linear,
     up_proj: Linear,
     down_proj: Linear,
-    act_fn: Activation,
+    act_fn: candle_nn::Activation,
 }
 
 impl MLP {
@@ -164,7 +167,7 @@ impl MLP {
             gate_proj,
             up_proj,
             down_proj,
-            act_fn: cfg.hidden_act.unwrap_or(Activation::Silu),
+            act_fn: cfg.hidden_act.unwrap(),
         })
     }
 }
@@ -201,7 +204,7 @@ impl Attention {
         let num_heads = cfg.num_attention_heads;
         let num_kv_heads = cfg.num_key_value_heads;
         let head_dim = hidden_sz / num_heads;
-        let q_proj = linear_no_bias(
+        let q_proj = linear(
             hidden_sz,
             num_heads * head_dim,
             vb.pp("q_proj"),
@@ -209,7 +212,7 @@ impl Attention {
             &cfg.quantization_config,
             dtype,
         )?;
-        let k_proj = linear_no_bias(
+        let k_proj = linear(
             hidden_sz,
             num_kv_heads * head_dim,
             vb.pp("k_proj"),
@@ -217,7 +220,7 @@ impl Attention {
             &cfg.quantization_config,
             dtype,
         )?;
-        let v_proj = linear_no_bias(
+        let v_proj = linear(
             hidden_sz,
             num_kv_heads * head_dim,
             vb.pp("v_proj"),
@@ -293,7 +296,6 @@ impl Attention {
             &k.to_dtype(DType::F32)?,
             input_positions,
         )?;
-
         let q = q.to_dtype(v.dtype())?;
         let k = k.to_dtype(v.dtype())?;
 
@@ -370,7 +372,7 @@ impl DecoderLayer {
     }
 }
 
-pub struct Mistral {
+pub struct Qwen2 {
     embed_tokens: candle_nn::Embedding,
     layers: Vec<DecoderLayer>,
     norm: RmsNorm,
@@ -381,7 +383,7 @@ pub struct Mistral {
     cfg: Config,
 }
 
-impl Mistral {
+impl Qwen2 {
     pub fn new(vb: VarBuilder, cfg: &Config, dtype: DType, device: &Device) -> Result<Self> {
         let vb_m = vb.pp("model");
         let embed_tokens =
@@ -397,7 +399,11 @@ impl Mistral {
         let lm_head = linear_no_bias(
             cfg.hidden_size,
             cfg.vocab_size,
-            vb.pp("lm_head"),
+            if cfg.tie_word_embeddings {
+                vb_m.pp("embed_tokens")
+            } else {
+                vb.pp("lm_head")
+            },
             &None, //no quant for lm_head
             &None,
             dtype,
@@ -415,18 +421,26 @@ impl Mistral {
     }
 
     fn prepare_decoder_attention_mask(&self, b_size: usize, tgt_len: usize) -> Result<Tensor> {
-        let sliding_window = self.sliding_window.unwrap_or(tgt_len + 1);
-        let mask: Vec<_> = (0..tgt_len)
-            .flat_map(|i| {
-                (0..tgt_len).map(move |j| {
-                    if i < j || j + sliding_window < i {
-                        f32::NEG_INFINITY
-                    } else {
-                        0.
-                    }
+        // Sliding window mask?
+        let mask: Vec<_> = if self.sliding_window.is_some() {
+            let sliding_window = self.sliding_window.unwrap();
+            (0..tgt_len)
+                .flat_map(|i| {
+                    (0..tgt_len).map(move |j| {
+                        if i < j || j + sliding_window < i {
+                            f32::NEG_INFINITY
+                        } else {
+                            0.
+                        }
+                    })
                 })
-            })
-            .collect();
+                .collect()
+        } else {
+            (0..tgt_len)
+                .flat_map(|i| (0..tgt_len).map(move |j| if i < j { f32::NEG_INFINITY } else { 0. }))
+                .collect()
+        };
+
         let mask = Tensor::from_slice(&mask, (tgt_len, tgt_len), &self.device)?;
         mask.expand((b_size, 1, tgt_len, tgt_len))?
             .to_dtype(self.dtype)
@@ -447,6 +461,7 @@ impl Mistral {
             Some(mask)
         };
         let mut xs = self.embed_tokens.forward(input_ids)?;
+
         if let Some(kv_caches) = kv_caches {
             for ((k_cache, v_cache), layer) in zip(kv_caches.iter(), self.layers.iter_mut()) {
                 xs = layer.forward(
@@ -468,12 +483,11 @@ impl Mistral {
                 )?
             }
         }
-        let logits = xs
-            .i((.., seq_len - 1, ..))?
-            .apply(&self.norm)?
-            .apply(&self.lm_head)?;
 
-        logits.to_dtype(DType::F32)
+        xs.i((.., seq_len - 1, ..))?
+            .apply(&self.norm)?
+            .apply(&self.lm_head)?
+            .to_dtype(DType::F32)
     }
 
     pub fn get_config(&self) -> &Config {

@@ -1,5 +1,4 @@
-use crate::candle::D;
-use crate::candle::{DType, Error, Result, Tensor};
+use candle_core::{DType, Error, Result, Tensor, D};
 use rand::{distributions::Distribution, SeedableRng};
 use std::sync::Arc;
 use std::sync::Mutex;

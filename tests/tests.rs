@@ -5,12 +5,12 @@ use axum::{
 };
 use candle_core::{DType, Device};
 use candle_vllm::{
+    engine::{cache_engine::CacheConfig, SchedulerConfig},
     get_model_loader,
     openai::{
-        openai_server::chat_completions, pipelines::llm_engine::LLMEngine, responses::APIError,
+        handlers::chat_completions, pipelines::llm_engine::LLMEngine, responses::APIError,
         OpenAIServerData,
     },
-    scheduler::{cache_engine::CacheConfig, SchedulerConfig},
     ModelSelected,
 };
 use std::sync::Arc;

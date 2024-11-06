@@ -5,14 +5,9 @@ use std::{
 };
 
 use super::{ModulePipeline, _make_tensor_with_pad};
-use crate::engine::Scheduler;
 use crate::openai::streaming::ChatResponse;
+use crate::scheduler::Scheduler;
 use crate::{
-    engine::{
-        cache_engine::{CacheConfig, CacheEngine},
-        sequence::{Sequence, SequenceGroup, _Sequence},
-        SchedulerConfig, SchedulerOutput,
-    },
     openai::{
         responses::{
             APIError, ChatChoice, ChatChoiceData, ChatCompletionChunk, ChatCompletionUsageResponse,
@@ -22,6 +17,11 @@ use crate::{
         utils::get_created_time_secs,
     },
     paged_attention::input_metadata::InputMetadata,
+    scheduler::{
+        cache_engine::{CacheConfig, CacheEngine},
+        sequence::{Sequence, SequenceGroup, _Sequence},
+        SchedulerConfig, SchedulerOutput,
+    },
     try_api,
 };
 use candle_core::Tensor;

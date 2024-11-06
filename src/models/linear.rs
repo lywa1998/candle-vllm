@@ -19,12 +19,10 @@
 //! ```
 use super::QuantConfig;
 use crate::backend::gptq::{gptq_matmul, gptq_weight_repack};
-use crate::candle::Module;
-use crate::candle::{
-    quantized::{gguf_file, QMatMul, QTensor},
-    DType, Device, Result, Tensor,
+use candle_core::{
+    quantized::{self, gguf_file, QMatMul, QTensor},
+    DType, Device, Module, Result, Tensor,
 };
-use candle_core::quantized;
 use candle_nn::init;
 use either::Either;
 use std::sync::Arc;
@@ -339,6 +337,7 @@ pub fn qlinear(
     }
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct QLinear {
     inner: QMatMul,

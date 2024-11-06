@@ -1,22 +1,23 @@
+use super::TokenOutputStream;
 use super::{get_token, ModelLoader, ModelPaths, ModulePipeline, TokenOrFinishReason};
+use crate::engine::sequence::SequenceGroup;
+use crate::models::TokenID;
 use crate::openai::logits_processor::{LogitsProcessor, Sampling};
-use crate::openai::models::TokenID;
 use crate::openai::sampling_params::{Logprobs, TopLogprob};
-use crate::scheduler::sequence::SequenceGroup;
 use crate::{
+    models::{
+        gemma::{Gemma, GemmaConfig},
+        llama::{Llama, LlamaConfig},
+        mistral::{Mistral, MistralConfig},
+        qwen2::{Qwen2, QwenConfig},
+        Config,
+    },
     openai::{
         conversation::{
             default_conversation::{
                 DefaultConversation, DefaultConversationSeparators, SeparatorStyle,
             },
             Conversation,
-        },
-        models::{
-            gemma::{Gemma, GemmaConfig},
-            llama::{Llama, LlamaConfig},
-            mistral::{Mistral, MistralConfig},
-            qwen2::{Qwen2, QwenConfig},
-            Config,
         },
         responses::APIError,
         PipelineConfig,
@@ -25,7 +26,6 @@ use crate::{
     try_api, SpecificConfig,
 };
 use candle_core::{DType, Device, IndexOp, Tensor};
-use candle_examples::token_output_stream::TokenOutputStream;
 use candle_nn::VarBuilder;
 use either::Either;
 use either::Either::{Left, Right};
@@ -197,7 +197,7 @@ impl ModelLoader for DefaultLoader {
         let tokenizer_ = Tokenizer::from_file(paths.get_tokenizer_filename())
             .map_err(|x| APIError::new(x.to_string()))?;
 
-        let tokenizer = candle_examples::token_output_stream::TokenOutputStream::new(tokenizer_);
+        let tokenizer = TokenOutputStream::new(tokenizer_);
 
         println!("Done loading.");
 

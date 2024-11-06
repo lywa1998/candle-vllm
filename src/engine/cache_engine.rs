@@ -7,7 +7,8 @@ use candle_core::{DType, Device, Tensor};
 
 use crate::{
     backend::{copy_blocks, swap_blocks},
-    openai::{models::Config, responses::APIError},
+    models::Config,
+    openai::responses::APIError,
     try_api,
 };
 

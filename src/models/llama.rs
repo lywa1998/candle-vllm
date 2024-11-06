@@ -1,5 +1,7 @@
-use super::{Config, QuantConfig};
-use crate::openai::models::linear::{linear_no_bias_x as linear, LinearX as Linear};
+use super::{
+    linear::{linear_no_bias_x as linear, LinearX as Linear},
+    Config, QuantConfig,
+};
 use crate::paged_attention::input_metadata::InputMetadata;
 use crate::paged_attention::PagedAttention;
 use crate::SpecificConfig;
@@ -8,7 +10,7 @@ use candle_core as candle;
 use candle_nn::{embedding, Embedding, Module, VarBuilder};
 use candle_transformers::models::with_tracing::RmsNorm;
 pub const MAX_SEQ_LEN: usize = 4096;
-use crate::openai::models::TokenID;
+use super::TokenID;
 use std::iter::zip;
 
 #[derive(Debug, Clone, serde::Deserialize)]

@@ -1,3 +1,5 @@
+pub mod handlers;
+
 use candle_core::Device;
 use std::sync::Arc;
 use tokenizers::{EncodeInput, Encoding, Tokenizer};
@@ -50,7 +52,5 @@ pub struct OpenAIServerData {
 
 pub mod conversation;
 pub mod logits_processor;
-pub mod models;
-pub mod openai_server;
 pub mod pipelines;
 pub mod utils;

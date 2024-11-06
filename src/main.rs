@@ -4,18 +4,18 @@ use axum::{
     Router,
 };
 use candle_core::{DType, Device};
-use candle_vllm::openai::openai_server::chat_completions;
+use candle_vllm::engine::cache_engine::CacheConfig;
+use candle_vllm::engine::SchedulerConfig;
+use candle_vllm::openai::handlers::chat_completions;
 use candle_vllm::openai::pipelines::llm_engine::LLMEngine;
 use candle_vllm::openai::pipelines::pipeline::DefaultModelPaths;
 use candle_vllm::openai::responses::APIError;
 use candle_vllm::openai::OpenAIServerData;
-use candle_vllm::scheduler::cache_engine::CacheConfig;
-use candle_vllm::scheduler::SchedulerConfig;
-use candle_vllm::{get_model_loader, hub_load_local_safetensors, ModelSelected};
+use candle_vllm::{device, get_model_loader, hub_load_local_safetensors, ModelSelected};
 use clap::Parser;
 use std::sync::Arc;
 const SIZE_IN_MB: usize = 1024 * 1024;
-use candle_vllm::openai::models::Config;
+use candle_vllm::models::Config;
 use std::path::Path;
 use tokio::sync::Notify;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -82,9 +82,6 @@ struct Args {
 async fn main() -> Result<(), APIError> {
     let args = Args::parse();
     let (loader, model_id) = get_model_loader(args.command, args.model_id.clone());
-    if args.model_id.is_none() {
-        println!("No model id specified, using the default model or specified in the weight_path!");
-    }
 
     let paths = match &args.weight_path {
         Some(path) => Box::new(DefaultModelPaths {
@@ -133,7 +130,7 @@ async fn main() -> Result<(), APIError> {
         None => DType::BF16,
     };
 
-    let device = candle_examples::device(args.cpu).unwrap();
+    let device = device(args.cpu).unwrap();
     let model = loader.load_model(paths, dtype, device)?;
     let config: Config = model.0.get_model_config();
     let dsize = config.kv_cache_dtype.size_in_bytes();
@@ -178,8 +175,8 @@ async fn main() -> Result<(), APIError> {
         finish_notify: finish_notify.clone(),
     };
 
-    println!("Server started at http://127.0.0.1:{}.", args.port);
-
+    // start openai server
+    tracing::info!("Server started at http://127.0.0.1:{}.", args.port);
     let allow_origin = AllowOrigin::any();
     let cors_layer = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST])

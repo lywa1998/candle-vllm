@@ -1,8 +1,13 @@
 #![warn(clippy::cast_lossless)]
+
+pub mod models;
+
 use std::fmt::Display;
 
-use candle::Result;
-use candle_core as candle;
+use candle_core::{
+    utils::{cuda_is_available, metal_is_available},
+    Device, Result,
+};
 use clap::Subcommand;
 use openai::pipelines::{pipeline::DefaultLoader, ModelLoader};
 
@@ -139,6 +144,11 @@ pub fn get_model_loader(
     selected_model: ModelSelected,
     model_id: Option<String>,
 ) -> (Box<dyn ModelLoader>, String) {
+    if model_id.is_none() {
+        tracing::info!(
+            "No model id specified, using the default model or specified in the weight_path!"
+        );
+    }
     match selected_model {
         ModelSelected::Llama3 {
             repeat_last_n,
@@ -159,11 +169,7 @@ pub fn get_model_loader(
                 ),
                 "llama3".to_string(),
             )),
-            if let Some(model_id) = model_id {
-                model_id
-            } else {
-                "meta-llama/Meta-Llama-3.1-8B-Instruct".to_string()
-            },
+            model_id.unwrap_or("meta-llama/Meta-Llama-3.1-8B-Instruct".to_string()),
         ),
         ModelSelected::Qwen2 {
             repeat_last_n,
@@ -186,11 +192,7 @@ pub fn get_model_loader(
                 ),
                 "qwen2".to_string(),
             )),
-            if let Some(model_id) = model_id {
-                model_id
-            } else {
-                "Qwen/Qwen1.5-1.8B-Chat".to_string()
-            },
+            model_id.unwrap_or("Qwen/Qwen2.5-1.5B-Instruct".to_string()),
         ),
         ModelSelected::Gemma {
             repeat_last_n,
@@ -211,11 +213,7 @@ pub fn get_model_loader(
                 ),
                 "gemma".to_string(),
             )),
-            if let Some(model_id) = model_id {
-                model_id
-            } else {
-                "google/gemma-2b-it".to_string()
-            },
+            model_id.unwrap_or("google/gemma-2b-it".to_string()),
         ),
         ModelSelected::Mistral {
             repeat_last_n,
@@ -236,11 +234,7 @@ pub fn get_model_loader(
                 ),
                 "mistral".to_string(),
             )),
-            if let Some(model_id) = model_id {
-                model_id
-            } else {
-                "mistralai/Mistral-7B-Instruct-v0.3".to_string()
-            },
+            model_id.unwrap_or("mistralai/Mistral-7B-Instruct-v0.3".to_string()),
         ),
     }
 }
@@ -251,7 +245,8 @@ pub fn hub_load_local_safetensors(
 ) -> Result<Vec<std::path::PathBuf>> {
     println!("{:}", path.to_owned() + json_file);
     let jsfile = std::fs::File::open(path.to_owned() + json_file)?;
-    let json: serde_json::Value = serde_json::from_reader(&jsfile).map_err(candle::Error::wrap)?;
+    let json: serde_json::Value =
+        serde_json::from_reader(&jsfile).map_err(candle_core::Error::wrap)?;
     let weight_map = match json.get("weight_map") {
         None => panic!("no weight map in {json_file:?}"),
         Some(serde_json::Value::Object(map)) => map,
@@ -267,6 +262,28 @@ pub fn hub_load_local_safetensors(
 }
 
 pub mod backend;
+pub mod engine;
 pub mod openai;
 pub mod paged_attention;
-pub mod scheduler;
+
+pub fn device(cpu: bool) -> Result<Device> {
+    if cpu {
+        Ok(Device::Cpu)
+    } else if cuda_is_available() {
+        Ok(Device::new_cuda(0)?)
+    } else if metal_is_available() {
+        Ok(Device::new_metal(0)?)
+    } else {
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        {
+            println!(
+                "Running on CPU, to run on GPU(metal), build this example with `--features metal`"
+            );
+        }
+        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+        {
+            println!("Running on CPU, to run on GPU, build this example with `--features cuda`");
+        }
+        Ok(Device::Cpu)
+    }
+}

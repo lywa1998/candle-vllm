@@ -1,15 +1,11 @@
-//! The Scheduler uses a BlockEngine to schedule and automatically batch sequences. The
-//! primary method `schedule` returns the batched sequences as inputs, as well as the
-//! operations to be executed on the cache by the CacheEngine.
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+};
 
-/// The higher-level manager of the blocks allocated. Operations performed by the block engine do
-/// not directly change memory.
-pub mod block_engine;
-/// This is the lower-level manager of the cache. It manages swapping and copying the blocks and
-/// actually allocates the KV cache for the CPU and GPU. It is used by the LLMEngine to execute
-/// operations issued by the scheduler.
-pub mod cache_engine;
-pub mod sequence;
+use crate::engine::{block_engine::AllocStatus, sequence::SequenceStatus};
+
+use super::{block_engine::BlockEngine, cache_engine::CacheConfig, sequence::SequenceGroup};
 
 type CPUBlockFrom = usize;
 type GPUBlockFrom = usize;
@@ -17,15 +13,6 @@ type CPUBlockTo = usize;
 type GPUBlockTo = usize;
 type SrcBlockFrom = usize;
 type DstBlocksTo = Vec<usize>;
-
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Arc,
-};
-
-use crate::scheduler::{block_engine::AllocStatus, sequence::SequenceStatus};
-
-use self::{block_engine::BlockEngine, cache_engine::CacheConfig, sequence::SequenceGroup};
 
 pub struct SchedulerOutput {
     pub scheduled: Arc<VecDeque<Arc<SequenceGroup>>>,
